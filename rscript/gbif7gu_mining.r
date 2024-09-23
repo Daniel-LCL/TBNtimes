@@ -157,44 +157,55 @@ site <- 'E3'
 species <- '中杓鷸'
 site <- 'D1'
 ## 每個樣區分別檢查該物種是否能畫線
-i <- 6
+i <- 1
 species <- '紅冠水雞'
-lapply(1:length(unique(dwc_7gu_times$sampleAreaID)), function(i){
-  site <- unique(dwc_7gu_times$sampleAreaID) %>% .[i]
-  if(paste0(site,'_',species) %in% sp_count3$V1){
-    print(paste0('物種 //',species,'// 於 //',site,'// 樣區內紀錄至少涵蓋3年度，可繪製趨勢圖'))
-    # 補足每年缺值為0
-    a <- 
-      data.table(year = min(dwc_7gu_times$year):max(dwc_7gu_times$year), 
-                 sampleAreaID = site,
-                 vernacularName = species, 
-                 occID = paste0(min(dwc_7gu_times$year):max(dwc_7gu_times$year),'_',site,'_',species)
-      ) %>% 
-      left_join(., dwc_7gu_times[,c('eventID','scientificName','rawEventID',
-                                    'trendIndexValue','trendIndexType', 'occID')], by = 'occID') %>% 
-      data.table
-    a[is.na(a$trendIndexValue),'trendIndexValue'] <- 0
-    a %<>% mutate(trendIndexPercentage = trendIndexValue/a[a$year %in% min(a[trendIndexValue %out% 0,'year']),]$trendIndexValue*100)
-    # 畫圖
-    #### trendindex直出 a
-  }else{
-    print(paste0('物種 //',species,'// 於 //',site,'// 樣區內紀錄不足3年度，無法繪製趨勢圖'))
-  a <- 
-    data.table(year = min(dwc_7gu_times$year):max(dwc_7gu_times$year), 
-               sampleAreaID = site, 
-               vernacularName = species, 
-               occID = paste0(min(dwc_7gu_times$year):max(dwc_7gu_times$year),'_',site,'_',species),
-               eventID = NA, scientificName = NA, rawEventID = NA, 
-               trendIndexValue = NA, trendIndexType = NA, trendIndexPercentage = NA
-               ) %>% 
-    data.table
-    a[is.na(a$trendIndexValue),'trendIndexValue'] <- 0
-    a %<>% mutate(trendIndexPercentage = trendIndexValue/a[a$year %in% min(a[trendIndexValue %out% 0,'year']),]$trendIndexValue*100)
-  }
-  a
-} %>% 
-  do.call(rbind, .))
-
+trend_sites <- 
+  lapply(1:length(unique(dwc_7gu_times$sampleAreaID)), function(i){
+    site <- unique(dwc_7gu_times$sampleAreaID) %>% .[i]
+    if(paste0(site,'_',species) %in% sp_count3$V1){
+      print(paste0('物種 //',species,'// 於 //',site,'// 樣區內紀錄至少涵蓋3年度，可繪製趨勢圖'))
+      # 補足每年缺值為0
+      a <- 
+        data.table(year = min(dwc_7gu_times$year):max(dwc_7gu_times$year), 
+                   sampleAreaID = site,
+                   vernacularName = species, 
+                   occID = paste0(min(dwc_7gu_times$year):max(dwc_7gu_times$year),'_',site,'_',species)
+        ) %>% 
+        left_join(., dwc_7gu_times[,c('eventID','scientificName','rawEventID',
+                                      'trendIndexValue','trendIndexType', 'occID')], by = 'occID') %>% 
+        data.table
+      a[is.na(a$trendIndexValue),'trendIndexValue'] <- 0
+      a %<>% mutate(trendIndexPercentage = trendIndexValue/a[a$year %in% min(a[trendIndexValue %out% 0,'year']),]$trendIndexValue*100)
+      a
+    }else{
+      print(paste0('物種 //',species,'// 於 //',site,'// 樣區內紀錄不足3年度，無法繪製趨勢圖'))
+      a <- 
+        data.table(year = min(dwc_7gu_times$year):max(dwc_7gu_times$year), 
+                   sampleAreaID = site, 
+                   vernacularName = species, 
+                   occID = paste0(min(dwc_7gu_times$year):max(dwc_7gu_times$year),'_',site,'_',species),
+                   eventID = NA, scientificName = NA, rawEventID = NA, 
+                   trendIndexValue = NA, trendIndexType = NA, trendIndexPercentage = NA
+                   ) %>% 
+        data.table
+      a$trendIndexValue <- as.numeric(a$trendIndexValue)
+      a[is.na(a$trendIndexValue),'trendIndexValue'] <- 0
+      a %<>% mutate(trendIndexPercentage = 0)
+      a
+    }
+  }) %>% 
+    do.call(rbind, .)
+# 作圖
+  ggplot(trend_sites) +
+  geom_line(aes(x = year, y = trendIndexPercentage, 
+                group = sampleAreaID, color = sampleAreaID), 
+            linewidth = 2) +
+  annotate('text', 
+           y = max(trend_sites$trendIndexPercentage), 
+           x = 2006,
+           label = 'y: relative mean individual per year since 2004') +
+  ggtitle(species)
+trend_sites[trendIndexPercentage > 100,]
 ##########################
 
 # 統計整個計畫每個物種幾個樣區上升，幾個樣區下降 (高/低於100%者超過一半，都沒有則無差別)
