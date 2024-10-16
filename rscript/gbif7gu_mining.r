@@ -76,9 +76,9 @@ dwc_7gu_times <-
   # 合併計算trend index
   group_by(year, sampleAreaID, scientificName, vernacularName) %>% 
   summarise(rawEventID = paste0(eventID, collapse = ';'), 
-            numOfSurvey = uniqueN(eventID),
-            numOfMonth = uniqueN(month),
-            trendIndexValue = sum(individualCount)/numOfSurvey, 
+            yearSurveyCount = uniqueN(eventID),
+            # numOfMonth = uniqueN(month),
+            trendIndexValue = sum(individualCount)/yearSurveyCount, 
             trendIndexType = 'Individual') %>% 
   # 接上新的eventID、occurrenceID、以及計算單一物種是否超過三年紀錄的timeID
   mutate(eventID = paste0(year,'_',sampleAreaID), 
