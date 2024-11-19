@@ -1,7 +1,27 @@
+# check packages
+yourInstalledPackages <- rownames(installed.packages())
+targetPackages <- c('data.table', 'dplyr', 'magrittr', 'ggplot2', 'ggpubr')
+# install uninstalled packages
+i <- j <- 1
+lapply(1:5, function(i){
+  checkResult <- 
+    unlist(
+      lapply(1:length(yourInstalledPackages), function(j){
+        a <- targetPackages[i] == yourInstalledPackages[j]
+      })
+    )
+  if(length(unique(checkResult)) == 2){
+    'already installed target packges'
+  }else{
+    'found uninstalled target packages, start installing'
+    install.packages(targetPackages[i])
+  }
+})
 library(data.table)
 library(dplyr)
 library(magrittr)
 `%out%` <- function(a,b){!a %in% b}
+# read your raw time series data
 gbif_7gu_event <- fread('data/dwc/event.txt', encoding = 'UTF-8')
 gbif_7gu_occ <- fread('data/dwc/occurrence.txt', encoding = 'UTF-8')
 gbif_7gu_measure <- fread('data/dwc/extendedmeasurementorfact.txt', encoding = 'UTF-8')
@@ -67,12 +87,12 @@ dwc_7gu %>%
   group_by(sampleAreaID) %>% 
   summarise(n_year = uniqueN(year)) %>% 
   View
+
 # trend index
 dwc_7gu_times <- 
   dwc_7gu %>% 
   # 接上occurrence
   left_join(., gbif_7gu_occ[,c('eventID', 'occurrenceID', 'individualCount', 'scientificName', 'vernacularName')], by = 'eventID') %>% 
-  mutate(projectName = 'Long-term Bird Census in Cigu 2004-2017') %>% 
   # 合併計算trend index
   group_by(year, sampleAreaID, scientificName, vernacularName) %>% 
   summarise(rawEventID = paste0(eventID, collapse = ';'), 
@@ -81,27 +101,80 @@ dwc_7gu_times <-
             trendIndexValue = sum(individualCount)/yearSurveyCount, 
             trendIndexType = 'Individual') %>% 
   # 接上新的eventID、occurrenceID、以及計算單一物種是否超過三年紀錄的timeID
-  mutate(eventID = paste0(year,'_',sampleAreaID), 
+  mutate(trendEventID = paste0(year,'_',sampleAreaID), 
          occID = paste0(year,'_',sampleAreaID,'_',vernacularName),
-         timeID = paste0(sampleAreaID,'_',vernacularName)) %>% 
+         timeID = paste0(sampleAreaID,'_',vernacularName), 
+         projectName = 'Long-term Bird Census in Cigu 2004-2017', 
+         targetTaxonomicScope = 'Aves',
+         excludedTaxonomicScope = 'Passeriformes', 
+         trendTaxonRank = 'species',
+         verbatimSiteNames = sampleAreaID
+         ) %>% 
   data.table
+# 檢查樣區變動狀況
+dwc_7gu_times %>% 
+  group_by(year, sampleAreaID, verbatimSiteNames) %>% 
+  summarise(projectName = 'Long-term Bird Census in Cigu 2004-2017') %>% 
+  data.frame
+
+## 修改verbatimSiteNames，對應樣區變動
+### 2010以前  D1,       D2,       J2
+### 2011     (D1;D1A), (D2;D2A), (J2;J2A)
+### 2012     D1A,      D2A,      (J2A;J2B)
+### 2013以後 D1A,      D2A,      J2B
+dwc_7gu_times[(year %in% 2011) & (sampleAreaID %in% 'D1'), 'verbatimSiteNames'] <- 'D1;D1A'
+dwc_7gu_times[(year %in% 2011) & (sampleAreaID %in% 'D2'), 'verbatimSiteNames'] <- 'D2;D2A'
+dwc_7gu_times[(year %in% 2011) & (sampleAreaID %in% 'J2'), 'verbatimSiteNames'] <- 'J2;J2A'
+dwc_7gu_times[(year %in% 2012) & (sampleAreaID %in% 'J2'), 'verbatimSiteNames'] <- 'J2A;J2B'
+dwc_7gu_times[(year >= 2012) & (sampleAreaID %in% 'D1'), 'verbatimSiteNames'] <- 'D1A'
+dwc_7gu_times[(year >= 2012) & (sampleAreaID %in% 'D2'), 'verbatimSiteNames'] <- 'D2A'
+dwc_7gu_times[(year >= 2013) & (sampleAreaID %in% 'J2'), 'verbatimSiteNames'] <- 'J2B'
+
+###########################################################
+# generate target tables 2024.10.17
+# times table
+dwc_7gu_times[,c('projectName', 'trendEventID', 'sampleAreaID', 'verbatimSiteNames',
+                 'year', 'trendTaxonRank', 'targetTaxonomicScope', 'excludedTaxonomicScope',
+                 'scientificName', 'trendIndexValue', 'trendIndexType')] %>%
+fwrite(., 'data/long-term-7gu_Times_101718.csv')
+  
+# site table
+left_join(dwc_7gu[, c('sampleAreaID', 'verbatimSiteNames', 
+                      'geospatialScopeAreaValue', 'geospatialScopeAreaUnit',
+                      'totalAreaSampledValue', 'totalAreaSampledUnit')],
+          gbif_7gu_event %>% 
+            group_by(locationID) %>% 
+            summarise(decimalLatitude = unique(decimalLatitude), 
+                      decimalLongitude = unique(decimalLongitude), 
+                      coordinateUncertaintyInMeters = unique(coordinateUncertaintyInMeters)) %>% 
+            data.frame,
+          by = c('verbatimSiteNames' = 'locationID')
+) %>% 
+  .[,c('sampleAreaID', 'verbatimSiteNames', 
+       'decimalLatitude', 'decimalLongitude', 'coordinateUncertaintyInMeters',
+       'geospatialScopeAreaValue', 'geospatialScopeAreaUnit', 
+       'totalAreaSampledValue', 'totalAreaSampledUnit')] %>% 
+  fwrite(., 'data/long-term-7u_site_101718.csv')
+
+# event-occ table
+left_join(dwc_7gu[,list(eventID, year, sampleAreaID, verbatimSiteNames)], 
+          gbif_7gu_occ[,list(eventID, occurrenceID)], 
+          by = 'eventID') %>% 
+  mutate(trendEventID = paste0(year, '_', sampleAreaID)) %>% 
+  .[,c('trendEventID', 'occurrenceID', 'eventID')] %>% 
+  fwrite(., 'data/long-term-7gu_event-occ_101718.csv')
+
+##############################################################
 
 ##################################################################
 # 嘗試做圖
 library(ggplot2)
 library(ggpubr)
-### 檢視單一樣區單一物種的年份數 (趨勢線比較有機會漂亮的單位)
+### 檢視單一樣區單一物種的年份數 (找趨勢線比較有機會漂亮的樣區_物種)
 dwc_7gu_times %>% 
   group_by(vernacularName, sampleAreaID) %>% 
   summarise(n_year = uniqueN(year)) %>% 
   data.frame
-
-### 統計各 樣區_物種 代碼的紀錄次數 (>=3次可繪製趨勢圖)
-sp_count3 <- 
-  table(dwc_7gu_times$timeID) %>% 
-  data.table %>% 
-  .[N >= 3,]
-sp_count3
 
 #### 每年資料多的物種
 species <- '青足鷸'
@@ -113,7 +186,16 @@ site <- 'E3'
 species <- '中杓鷸'
 site <- 'D1'
 
+### 統計各 樣區_物種 代碼的紀錄次數 (>=3次才可繪製趨勢圖)
+sp_count3 <- 
+  table(dwc_7gu_times$timeID) %>% 
+  data.table %>% 
+  .[N >= 3,]
+sp_count3
+
 # 做圖
+library(ggplot2)
+library(ggpubr)
 if(paste0(site,'_',species) %in% sp_count3$V1){
   print(paste0('物種 //',species,'// 於 //',site,'// 樣區內紀錄至少涵蓋3年度，可繪製趨勢圖'))
   # 補足每年缺值為0
